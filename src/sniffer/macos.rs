@@ -239,15 +239,18 @@ fn attach_bpf_filter(fd: RawFd) -> Result<(), SnifferError> {
     }
 
     let filter: Vec<BpfInsn> = vec![
-        BpfInsn { code: 0x28, jt: 0, jf: 0, k: 12 },
-        BpfInsn { code: 0x15, jt: 0, jf: 3, k: 0x0800 },
-        BpfInsn { code: 0x30, jt: 0, jf: 0, k: 23 },
-        BpfInsn { code: 0x15, jt: 4, jf: 5, k: 6 },
-        BpfInsn { code: 0x15, jt: 0, jf: 4, k: 0x86DD },
-        BpfInsn { code: 0x30, jt: 0, jf: 0, k: 20 },
-        BpfInsn { code: 0x15, jt: 1, jf: 2, k: 6 },
-        BpfInsn { code: 0x06, jt: 0, jf: 0, k: 0xFFFF },
-        BpfInsn { code: 0x06, jt: 0, jf: 0, k: 0 },
+        BpfInsn { code: 0x28, jt: 0, jf: 0, k: 0x0000000c },
+        BpfInsn { code: 0x15, jt: 0, jf: 2, k: 0x00000800 },
+        BpfInsn { code: 0x30, jt: 0, jf: 0, k: 0x00000017 },
+        BpfInsn { code: 0x15, jt: 6, jf: 7, k: 0x00000006 },
+        BpfInsn { code: 0x15, jt: 0, jf: 6, k: 0x000086dd },
+        BpfInsn { code: 0x30, jt: 0, jf: 0, k: 0x00000014 },
+        BpfInsn { code: 0x15, jt: 3, jf: 0, k: 0x00000006 },
+        BpfInsn { code: 0x15, jt: 0, jf: 3, k: 0x0000002c },
+        BpfInsn { code: 0x30, jt: 0, jf: 0, k: 0x00000036 },
+        BpfInsn { code: 0x15, jt: 0, jf: 1, k: 0x00000006 },
+        BpfInsn { code: 0x06, jt: 0, jf: 0, k: 0x00040000 },
+        BpfInsn { code: 0x06, jt: 0, jf: 0, k: 0x00000000 },
     ];
 
     #[repr(C)]
