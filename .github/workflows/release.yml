@@ -27,7 +27,7 @@ jobs:
             name: sni-spoof-rs-macos-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            name: sni-spoof-rs-windows-amd64.exe
+            name: sni-spoof-rs-windows-amd64
 
     runs-on: ${{ matrix.os }}
 
@@ -58,15 +58,25 @@ jobs:
 
       - name: Package (windows)
         if: runner.os == 'Windows'
-        shell: bash
+        shell: pwsh
         run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/sni-spoof-rs.exe dist/${{ matrix.name }}
+          New-Item -ItemType Directory -Force -Path dist/sni-spoof-rs-windows-amd64
+          Copy-Item target/${{ matrix.target }}/release/sni-spoof-rs.exe dist/sni-spoof-rs-windows-amd64/
+          $sysFile = Get-ChildItem -Recurse -Path target -Filter "WinDivert64.sys" | Select-Object -First 1
+          if ($sysFile) {
+            Copy-Item $sysFile.FullName dist/sni-spoof-rs-windows-amd64/
+          } else {
+            Write-Host "WinDivert64.sys not found in build output, downloading from WinDivert release"
+            Invoke-WebRequest -Uri "https://github.com/basil00/Divert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip" -OutFile windivert.zip
+            Expand-Archive windivert.zip -DestinationPath windivert-extracted
+            Copy-Item windivert-extracted/WinDivert-2.2.2-A/x64/WinDivert64.sys dist/sni-spoof-rs-windows-amd64/
+          }
+          Compress-Archive -Path dist/sni-spoof-rs-windows-amd64/* -DestinationPath dist/${{ matrix.name }}.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: dist/${{ matrix.name }}
+          path: dist/${{ matrix.name }}${{ runner.os == 'Windows' && '.zip' || '' }}
 
   release:
     needs: build

@@ -90,6 +90,8 @@ sudo ./sni-spoof-rs config.json
 sni-spoof-rs.exe config.json
 ```
 
+**Windows note:** The Windows download is a zip containing `sni-spoof-rs.exe` and `WinDivert64.sys`. Keep both files in the same folder. The `.sys` file is the kernel driver that WinDivert needs to intercept packets.
+
 Then connect with your v2ray/xray client as usual.
 
 ### Logging
@@ -174,6 +176,8 @@ sudo ./sni-spoof-rs config.json
 # ویندوز (با دسترسی Administrator اجرا کنید)
 sni-spoof-rs.exe config.json
 ```
+
+**نکته ویندوز:** فایل دانلودی ویندوز یک zip است که شامل `sni-spoof-rs.exe` و `WinDivert64.sys` می‌باشد. هر دو فایل باید در یک پوشه باشند. فایل `.sys` درایور کرنل WinDivert است که برای رهگیری پکت‌ها لازم است.
 
 بعد از اجرا، کلاینت v2ray/xray خود را مثل همیشه وصل کنید.
 
