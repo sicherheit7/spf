@@ -1,5 +1,11 @@
 # sni-spoof-rs
 
+[![Release](https://img.shields.io/github/v/release/therealaleph/sni-spoofing-rust)](https://github.com/therealaleph/sni-spoofing-rust/releases/latest)
+[![Total Downloads](https://img.shields.io/github/downloads/therealaleph/sni-spoofing-rust/total?label=total%20downloads)](https://github.com/therealaleph/sni-spoofing-rust/releases)
+[![Latest Downloads](https://img.shields.io/github/downloads/therealaleph/sni-spoofing-rust/latest/total?label=latest%20release)](https://github.com/therealaleph/sni-spoofing-rust/releases/latest)
+[![Stars](https://img.shields.io/github/stars/therealaleph/sni-spoofing-rust?style=flat)](https://github.com/therealaleph/sni-spoofing-rust/stargazers)
+[![License](https://img.shields.io/github/license/therealaleph/sni-spoofing-rust)](LICENSE)
+
 Rust implementation of [patterniha's SNI-Spoofing](https://github.com/patterniha/SNI-Spoofing) DPI bypass technique. All credit for the original idea and method goes to [@patterniha](https://github.com/patterniha).
 
 A TCP forwarder that injects a fake TLS ClientHello with an intentionally wrong TCP sequence number right after the 3-way handshake. Stateful DPI reads the fake SNI and whitelists the flow. The real server drops the packet (out-of-window seq). Real traffic then passes through undetected.
@@ -55,6 +61,10 @@ Replace `CLOUDFLARE_IP` with the IP from step 1. The `fake_sni` can be any domai
 | `listen` | Local address and port to listen on |
 | `connect` | Cloudflare IP and port (must be an IP, not a hostname) |
 | `fake_sni` | SNI for the fake ClientHello (max 219 bytes) |
+| `conn_timeout_sec` | Seconds to wait for the upstream TCP connection to complete (default: `5`) |
+| `handshake_timeout_sec` | Seconds to wait for the sniffer to confirm the fake packet was sent (default: `2`) |
+| `keepalive_time_sec` | Seconds of idle before TCP keepalive probes begin (default: `11`) |
+| `keepalive_interval_sec` | Seconds between individual TCP keepalive probes (default: `2`) |
 
 Multiple listeners are supported -- each maps to one upstream.
 
@@ -146,6 +156,16 @@ nslookup myserver.example.com
 ```
 
 به جای `IP_CLOUDFLARE` آی‌پی مرحله ۱ را بگذارید. مقدار `fake_sni` می‌تواند هر دامنه‌ای باشد که فیلتر نیست (یک سایت معروف پشت کلادفلر بهتر جواب می‌دهد).
+
+| فیلد | توضیح |
+|---|---|
+| `listen` | آدرس و پورت محلی برای گوش دادن |
+| `connect` | آی‌پی و پورت کلادفلر (باید IP باشد، نه دامنه) |
+| `fake_sni` | SNI برای ClientHello جعلی (حداکثر ۲۱۹ بایت) |
+| `conn_timeout_sec` | ثانیه‌های انتظار برای برقراری اتصال  (پیش‌فرض: `5`) |
+| `handshake_timeout_sec` | ثانیه‌های انتظار برای تأیید ارسال پکت جعلی توسط sniffer (پیش‌فرض: `2`) |
+| `keepalive_time_sec` | ثانیه‌های بی‌فعالیتی قبل از شروع پروب‌های TCP keepalive (پیش‌فرض: `11`) |
+| `keepalive_interval_sec` | فاصله زمانی بین پروب‌های TCP keepalive به ثانیه (پیش‌فرض: `2`) |
 
 ### مرحله ۳: تغییر کانفیگ v2ray/xray
 
