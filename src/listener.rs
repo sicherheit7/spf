@@ -1,11 +1,24 @@
 use std::net::IpAddr;
+use std::time::Duration;
 
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::config::ListenerConfig;
 use crate::handler;
 use crate::proto::SnifferCommand;
+
+fn is_fd_exhausted(e: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        matches!(e.raw_os_error(), Some(libc::EMFILE) | Some(libc::ENFILE))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = e;
+        false
+    }
+}
 
 pub async fn run_listener(
     lc: ListenerConfig,
@@ -40,7 +53,13 @@ pub async fn run_listener(
                 });
             }
             Err(e) => {
-                error!("accept error: {}", e);
+                if is_fd_exhausted(&e) {
+                    warn!("accept error (fd exhausted, backing off 500ms): {}", e);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                } else {
+                    error!("accept error: {}", e);
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
             }
         }
     }
