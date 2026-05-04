@@ -7,15 +7,18 @@ mod listener;
 mod packet;
 mod proto;
 mod relay;
+mod scan;
 mod shutdown;
 mod sniffer;
 
 use std::net::IpAddr;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+use tokio_util::sync::CancellationToken;
 
 fn main() {
     tracing_subscriber::fmt()
@@ -24,8 +27,30 @@ fn main() {
         )
         .init();
 
-    let config_path = std::env::args().nth(1).unwrap_or_else(|| "config.json".into());
-    let cfg = match config::load(&config_path) {
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+
+    match raw_args.first().map(|s| s.as_str()) {
+        Some("scan") => scan::run(&raw_args[1..]),
+        Some("-h") | Some("--help") => print_top_level_help(),
+        _ => {
+            let config_path = raw_args.into_iter().next().unwrap_or_else(|| "config.json".into());
+            run_proxy(&config_path);
+        }
+    }
+}
+
+fn print_top_level_help() {
+    eprintln!("sni-spoof-rs -- DPI bypass via fake TLS ClientHello injection");
+    eprintln!();
+    eprintln!("USAGE:");
+    eprintln!("  sni-spoof-rs [CONFIG]        run as proxy (default: config.json)");
+    eprintln!("  sni-spoof-rs scan [OPTS]     probe SNIs for fake_sni candidates");
+    eprintln!();
+    eprintln!("Run 'sni-spoof-rs scan --help' for scan options.");
+}
+
+fn run_proxy(config_path: &str) {
+    let cfg = match config::load(config_path) {
         Ok(c) => c,
         Err(e) => {
             error!("{}", e);
@@ -91,6 +116,7 @@ fn main() {
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<proto::SnifferCommand>();
 
     let stop = Arc::new(AtomicBool::new(false));
+    let token = CancellationToken::new();
 
     let sniffer_stop = stop.clone();
     let sniffer_local_ips = local_ips.clone();
@@ -103,24 +129,35 @@ fn main() {
         .expect("failed to spawn sniffer thread");
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    let graceful_shutdown_sec = cfg.graceful_shutdown_sec;
     rt.block_on(async {
-        let signal_stop = stop.clone();
-        tokio::spawn(async move {
-            shutdown::wait_for_signal(signal_stop).await;
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            std::process::exit(0);
-        });
-
         let mut handles = Vec::new();
         for lc in cfg.listeners {
             let tx = cmd_tx.clone();
             let lip = resolve_local_ip(lc.connect.ip()).unwrap_or(local_ips[0]);
-            handles.push(tokio::spawn(listener::run_listener(lc, lip, tx)));
+            let tk = token.clone();
+            handles.push(tokio::spawn(listener::run_listener(lc, lip, tx, cfg.idle_timeout, cfg.buffer_size, tk)));
         }
 
-        for h in handles {
-            let _ = h.await;
+        shutdown::wait_for_signal(stop, token).await;
+
+        if graceful_shutdown_sec == 0 {
+            info!("graceful_shutdown_sec=0, exiting immediately");
+        } else {
+            info!("waiting up to {}s for active connections to drain", graceful_shutdown_sec);
+
+            let drain_all = async {
+                for h in handles {
+                    let _ = h.await;
+                }
+            };
+
+            if tokio::time::timeout(Duration::from_secs(graceful_shutdown_sec), drain_all).await.is_err() {
+                info!("drain timeout ({}s), forcing exit", graceful_shutdown_sec);
+            }
         }
+
+        info!("shutdown complete");
     });
 }
 

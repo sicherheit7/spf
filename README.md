@@ -24,7 +24,9 @@ A TCP forwarder that injects a fake TLS ClientHello with an intentionally wrong 
 cargo build --release
 ```
 
-Pre-built binaries for Linux (amd64/arm64), macOS (amd64/arm64), and Windows (amd64) are available on the [releases](https://github.com/therealaleph/sni-spoofing-rust/releases) page.
+Pre-built binaries for Linux (amd64/arm64), macOS (amd64/arm64), and Windows (amd64) are available two ways:
+- [GitHub Releases](https://github.com/therealaleph/sni-spoofing-rust/releases) page
+- The [`releases/`](releases/) folder in this repository (useful if the Releases page is blocked for you -- just clone the repo or download as ZIP)
 
 ## Setup Guide
 
@@ -44,6 +46,7 @@ You should get a Cloudflare IP (usually starts with `104.`, `172.67.`, `141.101.
 
 ```json
 {
+  "graceful_shutdown_sec": 0,
   "listeners": [
     {
       "listen": "0.0.0.0:40443",
@@ -65,6 +68,10 @@ Replace `CLOUDFLARE_IP` with the IP from step 1. The `fake_sni` can be any domai
 | `handshake_timeout_sec` | Seconds to wait for the sniffer to confirm the fake packet was sent (default: `2`) |
 | `keepalive_time_sec` | Seconds of idle before TCP keepalive probes begin (default: `11`) |
 | `keepalive_interval_sec` | Seconds between individual TCP keepalive probes (default: `2`) |
+
+| Top-level Field | Description |
+|---|---|
+| `graceful_shutdown_sec` | Seconds to wait for active connections to finish after receiving a shutdown signal. `0` exits immediately (default: `0`) |
 
 Multiple listeners are supported -- each maps to one upstream.
 
@@ -104,6 +111,31 @@ sni-spoof-rs.exe config.json
 
 Then connect with your v2ray/xray client as usual.
 
+### Finding a working fake_sni (scan mode)
+
+If your chosen `fake_sni` stops working (e.g., after a DPI update), the tool includes a scanner that probes a built-in list of ~650 Cloudflare-fronted domains and reports which ones pass through your network:
+
+```
+# scan using built-in list (no sudo needed -- scan mode is plain outbound TLS)
+./sni-spoof-rs scan
+
+# save working SNIs to a file
+./sni-spoof-rs scan -o working.txt
+
+# scan your own list
+./sni-spoof-rs scan --list my-snis.txt
+
+# probe against a specific Cloudflare IP
+./sni-spoof-rs scan --target 172.67.139.236:443
+
+# faster scanning
+./sni-spoof-rs scan --concurrency 30 --timeout 4
+```
+
+Pick any SNI from the output as your `fake_sni` in `config.json`. The scanner does not need root or the raw socket -- it just opens a TCP connection and sends a ClientHello.
+
+**Caveat:** this works for passive SNI-based DPI (the current common case). If your ISP does full TLS MITM (terminates and re-establishes TLS), most SNIs will appear "reachable" but the DPI bypass itself will still fail -- that problem requires a different tool (REALITY, Hysteria, ECH in xray).
+
 ### Logging
 
 The default log level is `warn` -- the tool runs silent unless something goes wrong. No connection metadata is logged by default.
@@ -114,6 +146,15 @@ Set `RUST_LOG` for verbosity when debugging:
 sudo RUST_LOG=info ./sni-spoof-rs config.json
 sudo RUST_LOG=debug ./sni-spoof-rs config.json
 ```
+### Building from source
+To build cross-platform binaries for all supported platforms, use the included Makefile:
+
+```bash
+make all
+```
+
+This will create binaries for Linux (x64/ARM64), macOS (x64/ARM64), and Windows (x64) in the bins/ directory. Individual platform targets are also available: make linux-x64, make macos-arm64, etc.
+
 
 ## How it works
 
@@ -145,6 +186,7 @@ nslookup myserver.example.com
 
 ```json
 {
+  "graceful_shutdown_sec": 0,
   "listeners": [
     {
       "listen": "0.0.0.0:40443",
@@ -166,6 +208,10 @@ nslookup myserver.example.com
 | `handshake_timeout_sec` | ثانیه‌های انتظار برای تأیید ارسال پکت جعلی توسط sniffer (پیش‌فرض: `2`) |
 | `keepalive_time_sec` | ثانیه‌های بی‌فعالیتی قبل از شروع پروب‌های TCP keepalive (پیش‌فرض: `11`) |
 | `keepalive_interval_sec` | فاصله زمانی بین پروب‌های TCP keepalive به ثانیه (پیش‌فرض: `2`) |
+
+| فیلد سطح بالا | توضیح |
+|---|---|
+| `graceful_shutdown_sec` | مدت انتظار (به ثانیه) برای اتمام اتصالات فعال پس از دریافت سیگنال خاموشی. مقدار `0` بلافاصله خارج می‌شود (پیش‌فرض: `0`) |
 
 ### مرحله ۳: تغییر کانفیگ v2ray/xray
 
@@ -201,9 +247,45 @@ sni-spoof-rs.exe config.json
 
 بعد از اجرا، کلاینت v2ray/xray خود را مثل همیشه وصل کنید.
 
+### پیدا کردن fake_sni قابل استفاده (حالت scan)
+
+اگر `fake_sni` فعلی شما کار نمی‌کند (مثلا بعد از آپدیت DPI)، ابزار یک اسکنر داخلی دارد که لیستی از حدود ۶۵۰ دامنه پشت کلادفلر را روی شبکه‌ی شما تست می‌کند و SNI‌های در دسترس را نشان می‌دهد:
+
+```
+# اسکن با لیست داخلی (نیاز به sudo ندارد)
+./sni-spoof-rs scan
+
+# ذخیره نتایج در فایل
+./sni-spoof-rs scan -o working.txt
+
+# استفاده از لیست سفارشی
+./sni-spoof-rs scan --list my-snis.txt
+
+# تست روی یک IP کلادفلر خاص
+./sni-spoof-rs scan --target 172.67.139.236:443
+
+# اسکن سریع‌تر
+./sni-spoof-rs scan --concurrency 30 --timeout 4
+```
+
+هر SNI از خروجی را می‌توانید در `config.json` به عنوان `fake_sni` بگذارید. حالت scan نیازی به root یا raw socket ندارد -- فقط یک اتصال TCP عادی باز می‌کند و ClientHello می‌فرستد.
+
+**نکته مهم:** این روش برای DPI غیرفعال که SNI را چک می‌کند (حالت رایج فعلی) جواب می‌دهد. اگر ISP شما TLS MITM کامل انجام می‌دهد (یعنی TLS را ترمینیت و دوباره باز می‌کند)، اکثر SNIها "قابل دسترس" نشان داده می‌شوند ولی خود دور زدن DPI کار نمی‌کند -- این مشکل نیاز به ابزار دیگری دارد (REALITY، Hysteria، یا فعال کردن ECH در xray).
+
+### بیلد از سورس
+برای ساخت فایل‌های اجرایی برای تمام پلتفرم‌ها، از Makefile موجود استفاده کنید:
+
+```bash
+make all
+```
+
+این دستور فایل‌های اجرایی برای لینوکس (x64/ARM64)، مک (x64/ARM64) و ویندوز (x64) را در پوشه bins/ می‌سازد. همچنین می‌توانید برای هر پلتفرم جداگانه بیلد بگیرید: make linux-x64، make macos-arm64 و غیره.
+
 ### دانلود
 
-فایل‌های اجرایی آماده برای لینوکس، مک و ویندوز از صفحه [releases](https://github.com/therealaleph/sni-spoofing-rust/releases) قابل دانلود هستند.
+فایل‌های اجرایی آماده برای لینوکس، مک و ویندوز از دو جا قابل دانلودند:
+- صفحه [GitHub Releases](https://github.com/therealaleph/sni-spoofing-rust/releases)
+- پوشه [`releases/`](releases/) در خود ریپازیتوری (اگر صفحه Releases برای شما فیلتر است از اینجا دانلود کنید -- کافیست ریپو را clone یا به صورت ZIP دانلود کنید)
 
 ## License
 
