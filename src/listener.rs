@@ -2,9 +2,9 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use tokio::net::TcpListener;
-use tokio::task::JoinSet;
-use tracing::{error, info, warn};
+use tokio::task::{JoinError, JoinSet};
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
 
 use crate::config::ListenerConfig;
 use crate::handler;
@@ -19,6 +19,16 @@ fn is_fd_exhausted(e: &std::io::Error) -> bool {
     {
         let _ = e;
         false
+    }
+}
+
+fn log_task_result(result: Result<(), JoinError>) {
+    if let Err(e) = result {
+        if e.is_panic() {
+            error!("connection task panicked: {}", e);
+        } else {
+            warn!("connection task ended unexpectedly: {}", e);
+        }
     }
 }
 
@@ -46,6 +56,12 @@ pub async fn run_listener(
     loop {
         let accepted = tokio::select! {
             result = listener.accept() => result,
+            task_result = tasks.join_next(), if !tasks.is_empty() => {
+                if let Some(result) = task_result {
+                    log_task_result(result);
+                }
+                continue;
+            }
             _ = token.cancelled() => break,
         };
 
@@ -61,7 +77,20 @@ pub async fn run_listener(
                 let keepalive_interval = lc.keepalive_interval_sec;
                 tasks.spawn(async move {
                     tracing::debug!(peer = %peer, "accepted connection");
-                    handler::handle_connection(stream, upstream, sni, lip, tx, conn_timeout, handshake_timeout, keepalive_time, keepalive_interval, idle_timeout, buffer_size).await;
+                    handler::handle_connection(
+                        stream,
+                        upstream,
+                        sni,
+                        lip,
+                        tx,
+                        conn_timeout,
+                        handshake_timeout,
+                        keepalive_time,
+                        keepalive_interval,
+                        idle_timeout,
+                        buffer_size,
+                    )
+                    .await;
                 });
             }
             Err(e) => {
@@ -77,6 +106,8 @@ pub async fn run_listener(
     }
 
     info!(listen = %lc.listen, "stopped accepting, draining active connections");
-    while tasks.join_next().await.is_some() {}
+    while let Some(result) = tasks.join_next().await {
+        log_task_result(result);
+    }
     info!(listen = %lc.listen, "all connections drained");
 }

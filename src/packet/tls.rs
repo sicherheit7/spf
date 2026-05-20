@@ -7,9 +7,8 @@ const TEMPLATE_SNI: &[u8] = b"mci.ir";
 
 pub const CLIENT_HELLO_SIZE: usize = 517;
 
-static TEMPLATE_BYTES: LazyLock<Vec<u8>> = LazyLock::new(|| {
-    hex::decode(TPL_HEX).expect("invalid template hex")
-});
+static TEMPLATE_BYTES: LazyLock<Vec<u8>> =
+    LazyLock::new(|| hex::decode(TPL_HEX).expect("invalid template hex"));
 
 fn template_bytes() -> &'static [u8] {
     &TEMPLATE_BYTES
@@ -17,14 +16,12 @@ fn template_bytes() -> &'static [u8] {
 
 mod hex {
     pub fn decode(s: &str) -> Result<Vec<u8>, String> {
-        if s.len() % 2 != 0 {
+        if !s.len().is_multiple_of(2) {
             return Err("odd length".into());
         }
         (0..s.len())
             .step_by(2)
-            .map(|i| {
-                u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string())
-            })
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
             .collect()
     }
 }
@@ -74,7 +71,12 @@ pub fn build_client_hello(sni: &str) -> Vec<u8> {
     out.extend_from_slice(&(pad_len as u16).to_be_bytes());
     out.extend_from_slice(&vec![0x00; pad_len]);
 
-    assert_eq!(out.len(), CLIENT_HELLO_SIZE, "ClientHello size mismatch: got {}", out.len());
+    assert_eq!(
+        out.len(),
+        CLIENT_HELLO_SIZE,
+        "ClientHello size mismatch: got {}",
+        out.len()
+    );
     out
 }
 

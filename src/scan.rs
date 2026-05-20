@@ -9,10 +9,10 @@ use tokio::sync::Semaphore;
 
 use crate::packet::tls;
 
-const DEFAULT_SNIS: &str = include_str!("../data/scan-snis.txt");
-const DEFAULT_TARGET: &str = "104.18.4.130:443";
-const DEFAULT_TIMEOUT_SECS: u64 = 6;
-const DEFAULT_CONCURRENCY: usize = 10;
+pub const DEFAULT_SNIS: &str = include_str!("../data/scan-snis.txt");
+pub const DEFAULT_TARGET: &str = "104.18.4.130:443";
+pub const DEFAULT_TIMEOUT_SECS: u64 = 6;
+pub const DEFAULT_CONCURRENCY: usize = 10;
 
 pub struct ScanOpts {
     pub target: SocketAddr,
@@ -22,8 +22,8 @@ pub struct ScanOpts {
     pub output: Option<String>,
 }
 
-#[derive(Debug)]
-enum ProbeOutcome {
+#[derive(Clone, Debug)]
+pub enum ProbeOutcome {
     Ok,
     ConnectFailed(String),
     ConnectTimeout,
@@ -33,9 +33,24 @@ enum ProbeOutcome {
     EmptyResponse,
 }
 
-struct ProbeResult {
-    sni: String,
-    outcome: ProbeOutcome,
+impl std::fmt::Display for ProbeOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProbeOutcome::Ok => write!(f, "ok"),
+            ProbeOutcome::ConnectFailed(e) => write!(f, "connect failed: {}", e),
+            ProbeOutcome::ConnectTimeout => write!(f, "connect timeout"),
+            ProbeOutcome::HandshakeFailed(e) => write!(f, "handshake failed: {}", e),
+            ProbeOutcome::ReadTimeout => write!(f, "read timeout"),
+            ProbeOutcome::BadResponse(b) => write!(f, "bad response: 0x{b:02x}"),
+            ProbeOutcome::EmptyResponse => write!(f, "empty response"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ProbeResult {
+    pub sni: String,
+    pub outcome: ProbeOutcome,
 }
 
 pub fn run(args: &[String]) {
@@ -50,7 +65,9 @@ pub fn run(args: &[String]) {
     };
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-    rt.block_on(async { scan_all(opts).await });
+    rt.block_on(async {
+        let _ = scan_all(opts).await;
+    });
 }
 
 fn parse_args(args: &[String]) -> Result<ScanOpts, String> {
@@ -70,17 +87,24 @@ fn parse_args(args: &[String]) -> Result<ScanOpts, String> {
             "--target" | "-t" => {
                 i += 1;
                 let v = args.get(i).ok_or("missing value for --target")?;
-                target = Some(v.parse().map_err(|e| format!("invalid --target '{}': {}", v, e))?);
+                target = Some(
+                    v.parse()
+                        .map_err(|e| format!("invalid --target '{}': {}", v, e))?,
+                );
             }
             "--timeout" => {
                 i += 1;
                 let v = args.get(i).ok_or("missing value for --timeout")?;
-                timeout_secs = v.parse().map_err(|e| format!("invalid --timeout '{}': {}", v, e))?;
+                timeout_secs = v
+                    .parse()
+                    .map_err(|e| format!("invalid --timeout '{}': {}", v, e))?;
             }
             "--concurrency" | "-c" => {
                 i += 1;
                 let v = args.get(i).ok_or("missing value for --concurrency")?;
-                concurrency = v.parse().map_err(|e| format!("invalid --concurrency '{}': {}", v, e))?;
+                concurrency = v
+                    .parse()
+                    .map_err(|e| format!("invalid --concurrency '{}': {}", v, e))?;
                 if concurrency == 0 {
                     return Err("--concurrency must be >= 1".into());
                 }
@@ -121,7 +145,11 @@ fn parse_args(args: &[String]) -> Result<ScanOpts, String> {
     })
 }
 
-fn parse_sni_list(content: &str) -> Vec<String> {
+pub fn default_snis() -> Vec<String> {
+    parse_sni_list(DEFAULT_SNIS)
+}
+
+pub fn parse_sni_list(content: &str) -> Vec<String> {
     content
         .lines()
         .map(|l| l.trim())
@@ -137,9 +165,18 @@ fn print_help() {
     eprintln!("  sni-spoof-rs scan [OPTIONS]");
     eprintln!();
     eprintln!("OPTIONS:");
-    eprintln!("  -t, --target ADDR        Cloudflare IP:port to probe against (default: {})", DEFAULT_TARGET);
-    eprintln!("      --timeout SECS       per-probe timeout in seconds (default: {})", DEFAULT_TIMEOUT_SECS);
-    eprintln!("  -c, --concurrency N      parallel probes (default: {})", DEFAULT_CONCURRENCY);
+    eprintln!(
+        "  -t, --target ADDR        Cloudflare IP:port to probe against (default: {})",
+        DEFAULT_TARGET
+    );
+    eprintln!(
+        "      --timeout SECS       per-probe timeout in seconds (default: {})",
+        DEFAULT_TIMEOUT_SECS
+    );
+    eprintln!(
+        "  -c, --concurrency N      parallel probes (default: {})",
+        DEFAULT_CONCURRENCY
+    );
     eprintln!("  -l, --list FILE          custom SNI list file (one per line, # for comments)");
     eprintln!("  -o, --output FILE        write working SNIs to file (one per line)");
     eprintln!("  -h, --help               print this help");
@@ -148,7 +185,7 @@ fn print_help() {
     eprintln!("Example: sni-spoof-rs scan -o working.txt");
 }
 
-async fn scan_all(opts: ScanOpts) {
+pub async fn scan_all(opts: ScanOpts) -> Vec<ProbeResult> {
     eprintln!(
         "scanning {} SNIs against {} (concurrency={}, timeout={}s)",
         opts.snis.len(),
@@ -168,7 +205,7 @@ async fn scan_all(opts: ScanOpts) {
         let sem = sem.clone();
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire_owned().await.expect("semaphore closed");
-            probe(target, sni, timeout).await
+            probe_sni(target, sni, timeout).await
         }));
     }
 
@@ -183,7 +220,7 @@ async fn scan_all(opts: ScanOpts) {
                     ok += 1;
                     println!("{}", r.sni);
                 }
-                if done % 20 == 0 || done == total {
+                if done.is_multiple_of(20) || done == total {
                     eprintln!("  progress: {}/{} ({} ok)", done, total, ok);
                 }
                 results.push(r);
@@ -213,42 +250,82 @@ async fn scan_all(opts: ScanOpts) {
         }
         eprintln!("wrote {} working SNIs to {}", working.len(), path);
     }
+
+    results
 }
 
-async fn probe(target: SocketAddr, sni: String, timeout: Duration) -> ProbeResult {
+pub async fn probe_sni(target: SocketAddr, sni: String, timeout: Duration) -> ProbeResult {
     if sni.len() > 219 {
-        return ProbeResult { sni, outcome: ProbeOutcome::HandshakeFailed("sni too long".into()) };
+        return ProbeResult {
+            sni,
+            outcome: ProbeOutcome::HandshakeFailed("sni too long".into()),
+        };
     }
 
     let mut stream = match tokio::time::timeout(timeout, TcpStream::connect(target)).await {
         Ok(Ok(s)) => s,
-        Ok(Err(e)) => return ProbeResult { sni, outcome: ProbeOutcome::ConnectFailed(e.to_string()) },
-        Err(_) => return ProbeResult { sni, outcome: ProbeOutcome::ConnectTimeout },
+        Ok(Err(e)) => {
+            return ProbeResult {
+                sni,
+                outcome: ProbeOutcome::ConnectFailed(e.to_string()),
+            }
+        }
+        Err(_) => {
+            return ProbeResult {
+                sni,
+                outcome: ProbeOutcome::ConnectTimeout,
+            }
+        }
     };
 
     let ch = tls::build_client_hello(&sni);
     match tokio::time::timeout(timeout, stream.write_all(&ch)).await {
         Ok(Ok(())) => {}
-        Ok(Err(e)) => return ProbeResult { sni, outcome: ProbeOutcome::HandshakeFailed(e.to_string()) },
-        Err(_) => return ProbeResult { sni, outcome: ProbeOutcome::HandshakeFailed("write timeout".into()) },
+        Ok(Err(e)) => {
+            return ProbeResult {
+                sni,
+                outcome: ProbeOutcome::HandshakeFailed(e.to_string()),
+            }
+        }
+        Err(_) => {
+            return ProbeResult {
+                sni,
+                outcome: ProbeOutcome::HandshakeFailed("write timeout".into()),
+            }
+        }
     }
 
     let mut buf = [0u8; 5];
     match tokio::time::timeout(timeout, stream.read_exact(&mut buf)).await {
         Ok(Ok(_)) => {
             if buf[0] == 0x16 {
-                ProbeResult { sni, outcome: ProbeOutcome::Ok }
+                ProbeResult {
+                    sni,
+                    outcome: ProbeOutcome::Ok,
+                }
             } else {
-                ProbeResult { sni, outcome: ProbeOutcome::BadResponse(buf[0]) }
+                ProbeResult {
+                    sni,
+                    outcome: ProbeOutcome::BadResponse(buf[0]),
+                }
             }
         }
         Ok(Err(e)) => {
             if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                ProbeResult { sni, outcome: ProbeOutcome::EmptyResponse }
+                ProbeResult {
+                    sni,
+                    outcome: ProbeOutcome::EmptyResponse,
+                }
             } else {
-                ProbeResult { sni, outcome: ProbeOutcome::HandshakeFailed(e.to_string()) }
+                ProbeResult {
+                    sni,
+                    outcome: ProbeOutcome::HandshakeFailed(e.to_string()),
+                }
             }
         }
-        Err(_) => ProbeResult { sni, outcome: ProbeOutcome::ReadTimeout },
+        Err(_) => ProbeResult {
+            sni,
+            outcome: ProbeOutcome::ReadTimeout,
+        },
     }
 }

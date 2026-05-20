@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tracing::info;
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 pub async fn wait_for_signal(stop: Arc<AtomicBool>, token: CancellationToken) {
     wait_for_os_signal().await;
